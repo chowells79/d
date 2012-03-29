@@ -6,19 +6,35 @@
 
 #include <netinet/in.h>
 
-#include <mad.h>
+#include "ao/ao.h"
+#include "mad.h"
 
 int create_listening_socket(const char *, in_port_t);
+void play_stream(int);
 
 int main() {
-  int sock = create_listening_socket("127.0.0.1", 0x3333);
+  int sock = create_listening_socket("127.0.0.1", 13107);
 
   struct sockaddr_in remote_addr;
   int size;
   int fd = accept(sock, (struct sockaddr *) &remote_addr, &size);
+  play_stream(fd);
   close(fd);
   shutdown(sock, SHUT_RDWR);
   return 0;
+}
+
+void play_stream(int fd) {
+  ao_initialize();
+  int driver_id = ao_default_driver_id();
+  if (driver_id == -1) {
+    perror("ao_default_driver_id");
+    exit(1);
+  }
+
+  ao_device *live = NULL;
+
+  ao_shutdown();
 }
 
 int create_listening_socket(const char *host_quad, in_port_t port) {
