@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <unistd.h>
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -6,7 +7,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#include "mad.h"
+#include <mad.h>
 
 int main() {
   int sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -25,6 +26,7 @@ int main() {
   struct sockaddr_in remote_addr;
   int size;
   int fd = accept(sock, (struct sockaddr *) &remote_addr, &size);
+  close(fd);
   shutdown(sock, SHUT_RDWR);
   return 0;
 }
