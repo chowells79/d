@@ -1,5 +1,8 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
+#include <errno.h>
+#include <string.h>
 
 #include <netinet/in.h>
 
@@ -19,21 +22,41 @@ int main() {
 }
 
 int create_listening_socket(const char *host_quad, in_port_t port) {
-  int enable = 1;
+  int e = 1;
   int sock = socket(AF_INET, SOCK_STREAM, 0);
 
-  setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (void *)&enable, sizeof(enable));
+  if (sock == -1) {
+    perror("socket");
+    exit(1);
+  }
+
+  if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (void *)&e, sizeof(e)) != 0) {
+    perror("setsockopt");
+    exit(1);
+  }
 
   struct in_addr addr;
-  inet_aton(host_quad, &addr);
+  bzero((void *)&addr, sizeof(addr));
+  if (inet_aton(host_quad, &addr) != 1) {
+    perror("inet_aton");
+    exit(1);
+  }
 
   struct sockaddr_in saddr;
+  bzero((void *)&saddr, sizeof(saddr));
   saddr.sin_family = AF_INET;
   saddr.sin_port = htons(port);
   saddr.sin_addr = addr;
 
-  bind(sock, (struct sockaddr *) &saddr, sizeof(saddr));
-  listen(sock, 5);
+  if (bind(sock, (struct sockaddr *) &saddr, sizeof(saddr)) != 0) {
+    perror("bind");
+    exit(1);
+  }
+
+  if (listen(sock, 5) != 0) {
+    perror("listen");
+    exit(1);
+  }
 
   return sock;
 }
