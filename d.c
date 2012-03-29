@@ -16,7 +16,7 @@ int main() {
   int sock = create_listening_socket("127.0.0.1", 13107);
 
   struct sockaddr_in remote_addr;
-  int size;
+  socklen_t size;
   int fd = accept(sock, (struct sockaddr *) &remote_addr, &size);
   play_stream(fd);
   close(fd);
@@ -46,25 +46,25 @@ int create_listening_socket(const char *host_quad, in_port_t port) {
     exit(1);
   }
 
-  if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (void *)&e, sizeof(e)) != 0) {
+  if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (void *)&e, sizeof e) != 0) {
     perror("setsockopt");
     exit(1);
   }
 
   struct in_addr addr;
-  bzero((void *)&addr, sizeof(addr));
+  memset((void *)&addr, 0, sizeof addr);
   if (inet_aton(host_quad, &addr) != 1) {
     perror("inet_aton");
     exit(1);
   }
 
   struct sockaddr_in saddr;
-  bzero((void *)&saddr, sizeof(saddr));
+  memset((void *)&saddr, 0, sizeof saddr);
   saddr.sin_family = AF_INET;
   saddr.sin_port = htons(port);
   saddr.sin_addr = addr;
 
-  if (bind(sock, (struct sockaddr *) &saddr, sizeof(saddr)) != 0) {
+  if (bind(sock, (struct sockaddr *) &saddr, sizeof saddr) != 0) {
     perror("bind");
     exit(1);
   }
