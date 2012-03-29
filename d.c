@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include <netinet/in.h>
+#include <arpa/inet.h>
 
 #include "ao/ao.h"
 #include "mad.h"
