@@ -13,7 +13,7 @@
 int create_listening_socket(const char *, in_port_t);
 void play_stream(int);
 
-int main() {
+int main(void) {
   int sock = create_listening_socket("127.0.0.1", 13107);
 
   struct sockaddr_in remote_addr;
