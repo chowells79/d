@@ -19,7 +19,10 @@ int main() {
 }
 
 int create_listening_socket(const char *host_quad, in_port_t port) {
+  int enable = 1;
   int sock = socket(AF_INET, SOCK_STREAM, 0);
+
+  setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (void *)&enable, sizeof(enable));
 
   struct in_addr addr;
   inet_aton(host_quad, &addr);
