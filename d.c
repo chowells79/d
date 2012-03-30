@@ -26,6 +26,53 @@ int main(void) {
   return 0;
 }
 
+struct state_container {
+  int fd;
+  ao_device *out;
+  ao_sample_format format;
+};
+
+enum mad_flow ignore_err(void *data,
+                         struct mad_stream *stream,
+                         struct mad_frame *frame) {
+  // like I care...
+  return MAD_FLOW_CONTINUE;
+}
+
+enum mad_flow play_output(void *data,
+                          struct mad_header const *header,
+                          struct mad_pcm *pcm) {
+  // magic goes here
+  return MAD_FLOW_CONTINUE;
+}
+
+enum mad_flow get_input(void *data,
+                        struct mad_stream *stream) {
+  struct state_container *state = (struct state_container *)data;
+
+  size_t size = 4 * 1024;
+  static void *buf = NULL;
+  if (buf == NULL) {
+    if ((buf = malloc(size)) == NULL) {
+      perror("malloc");
+      exit(1);
+    }
+  }
+
+  ssize_t count = read(state->fd, buf, size);
+
+  if (count < 0) {
+    perror("read");
+    exit(1);
+  } else if (count == 0) {
+    return MAD_FLOW_STOP;
+  } else {
+    mad_stream_buffer(stream, buf, count);
+    return MAD_FLOW_CONTINUE;
+  }
+}
+
+
 void play_stream(int fd) {
   ao_initialize();
   int driver_id = ao_default_driver_id();
@@ -34,7 +81,13 @@ void play_stream(int fd) {
     exit(1);
   }
 
-  ao_device *live = NULL;
+  struct state_container state;
+  memset((void *)&state, 0, sizeof state);
+  state.fd = fd;
+  state.out = NULL;
+
+  struct mad_decoder decoder;
+  mad_decoder_init(&decoder, &state, get_input, 0, 0, play_output, ignore_err, 0);
 
   ao_shutdown();
 }
