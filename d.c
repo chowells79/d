@@ -40,10 +40,14 @@ struct state_container {
   ao_sample_format format;
 };
 
-enum mad_flow ignore_err(void *data,
+enum mad_flow output_err(void *data,
                          struct mad_stream *stream,
                          struct mad_frame *frame) {
-  /* like I care... */
+  struct state_container *state = data;
+
+  fprintf(stderr, "decoding error 0x%04x (%s)\n",
+      stream->error, mad_stream_errorstr(stream));
+
   return MAD_FLOW_CONTINUE;
 }
 
@@ -98,6 +102,7 @@ enum mad_flow play_output(void *data,
   mad_fixed_t *right_ch  = pcm->samples[1];
   while (samples_left--) {
     int l = *left_ch++;
+    
     *point++ = (l >> 0 ) & 0xFF;
     *point++ = (l >> 8 ) & 0xFF;
     *point++ = (l >> 16) & 0xFF;
@@ -160,7 +165,7 @@ void play_stream(int fd) {
   state.out = NULL;
 
   struct mad_decoder decoder;
-  mad_decoder_init(&decoder, &state, get_input, 0, 0, play_output, ignore_err, 0);
+  mad_decoder_init(&decoder, &state, get_input, 0, 0, play_output, output_err, 0);
   mad_decoder_run(&decoder, MAD_DECODER_MODE_SYNC);
   mad_decoder_finish(&decoder);
 
