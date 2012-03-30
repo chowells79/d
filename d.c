@@ -11,15 +11,22 @@
 #include "ao/ao.h"
 #include "mad.h"
 
+#define LISTEN_PORT 13107
+
 int create_listening_socket(const char *, in_port_t);
 void play_stream(int);
 
 int main(void) {
-  int sock = create_listening_socket("127.0.0.1", 13107);
+  int sock = create_listening_socket("127.0.0.1", LISTEN_PORT);
 
   struct sockaddr_in remote_addr;
-  socklen_t size;
+  memset(&remote_addr, 0, sizeof remote_addr);
+  socklen_t size = sizeof remote_addr;
   int fd = accept(sock, (struct sockaddr *) &remote_addr, &size);
+  if (fd < 0) {
+    perror("accept");
+    exit(1);
+  }
   play_stream(fd);
   close(fd);
   shutdown(sock, SHUT_RDWR);
@@ -36,15 +43,15 @@ struct state_container {
 enum mad_flow ignore_err(void *data,
                          struct mad_stream *stream,
                          struct mad_frame *frame) {
-  // like I care...
+  /* like I care... */
   return MAD_FLOW_CONTINUE;
 }
 
 ao_sample_format make_sample_format(struct mad_pcm *pcm) {
   ao_sample_format res;
-  memset((void *)&res, 0, sizeof res);
+  memset(&res, 0, sizeof res);
 
-  res.bits = 24;
+  res.bits = 32;
   res.rate = pcm->samplerate;
   res.channels = 2;
   res.byte_format = AO_FMT_LITTLE;
@@ -61,22 +68,6 @@ int eq_sample_format(ao_sample_format *f1, ao_sample_format *f2) {
           strcmp(f1->matrix, f2->matrix) == 0);
 }
 
-inline signed int scale(mad_fixed_t sample)
-{
-  /* add noise! */
-  sample += rand() % (1L << (MAD_F_FRACBITS - 24));
-
-  /* clip */
-  if (sample >= MAD_F_ONE)
-    sample = MAD_F_ONE - 1;
-  else if (sample < -MAD_F_ONE)
-    sample = -MAD_F_ONE;
-
-  /* quantize */
-  return sample >> (MAD_F_FRACBITS + 1 - 24);
-}
-
-
 enum mad_flow play_output(void *data,
                           struct mad_header const *header,
                           struct mad_pcm *pcm) {
@@ -91,37 +82,37 @@ enum mad_flow play_output(void *data,
   }
 
   static char *buf = NULL;
-  int bufsize = 3 * 1024;
+  static char *point = NULL;
+  size_t bufsize = 4 * 1024 * 16;
   if (buf == NULL) {
-    if ((buf =(char *)malloc(bufsize)) == NULL) {
-      perror("malloc");
+    if ((buf = calloc(bufsize, 1)) == NULL) {
+      perror("calloc");
       exit(1);
     }
+    point = buf;
   }
 
   unsigned int nchannels = pcm->channels;
   unsigned int samples_left = pcm->length;
-  char *point = buf;
   mad_fixed_t *left_ch   = pcm->samples[0];
   mad_fixed_t *right_ch  = pcm->samples[1];
   while (samples_left--) {
-    int l = scale(*left_ch++);
-    *point++ = l & 0xFF;
-    *point++ = (l & 0xFF00) >> 8;
-    *point++ = (l & 0xFF0000) >> 16;
+    int l = *left_ch++;
+    *point++ = (l >> 0 ) & 0xFF;
+    *point++ = (l >> 8 ) & 0xFF;
+    *point++ = (l >> 16) & 0xFF;
+    *point++ = (l >> 24) & 0xFF;
 
-    int r = nchannels == 2 ? scale(*right_ch++) : l;
-    *point++ = r & 0xFF;
-    *point++ = (r & 0xFF00) >> 8;
-    *point++ = (r & 0xFF0000) >> 16;
+    int r = nchannels == 2 ? *right_ch++ : l;
+    *point++ = (r >> 0 ) & 0xFF;
+    *point++ = (r >> 8 ) & 0xFF;
+    *point++ = (r >> 16) & 0xFF;
+    *point++ = (r >> 24) & 0xFF;
 
     if (point == buf + bufsize) {
-      ao_play(state->out, buf, (uint_32)bufsize);
+      ao_play(state->out, buf, bufsize);
       point = buf;
     }
-  }
-  if (point > buf) {
-    ao_play(state->out, buf, (uint_32)(point - buf));
   }
 
   return MAD_FLOW_CONTINUE;
@@ -132,10 +123,10 @@ enum mad_flow get_input(void *data,
   struct state_container *state = (struct state_container *)data;
 
   size_t size = 4 * 1024;
-  static void *buf = NULL;
+  static unsigned char *buf = NULL;
   if (buf == NULL) {
-    if ((buf = malloc(size)) == NULL) {
-      perror("malloc");
+    if ((buf = calloc(size, 1)) == NULL) {
+      perror("calloc");
       exit(1);
     }
   }
@@ -163,7 +154,7 @@ void play_stream(int fd) {
   }
 
   struct state_container state;
-  memset((void *)&state, 0, sizeof state);
+  memset(&state, 0, sizeof state);
   state.fd = fd;
   state.driver_id = driver_id;
   state.out = NULL;
@@ -194,14 +185,14 @@ int create_listening_socket(const char *host_quad, in_port_t port) {
   }
 
   struct in_addr addr;
-  memset((void *)&addr, 0, sizeof addr);
+  memset(&addr, 0, sizeof addr);
   if (inet_aton(host_quad, &addr) != 1) {
     perror("inet_aton");
     exit(1);
   }
 
   struct sockaddr_in saddr;
-  memset((void *)&saddr, 0, sizeof saddr);
+  memset(&saddr, 0, sizeof saddr);
   saddr.sin_family = AF_INET;
   saddr.sin_port = htons(port);
   saddr.sin_addr = addr;
