@@ -28,6 +28,7 @@ int main(void) {
 
 struct state_container {
   int fd;
+  int driver_id;
   ao_device *out;
   ao_sample_format format;
 };
@@ -39,10 +40,90 @@ enum mad_flow ignore_err(void *data,
   return MAD_FLOW_CONTINUE;
 }
 
+ao_sample_format make_sample_format(struct mad_pcm *pcm) {
+  ao_sample_format res;
+  memset((void *)&res, 0, sizeof res);
+
+  res.bits = 24;
+  res.rate = pcm->samplerate;
+  res.channels = 2;
+  res.byte_format = AO_FMT_LITTLE;
+  res.matrix = "L,R";
+
+  return res;
+}
+
+int eq_sample_format(ao_sample_format *f1, ao_sample_format *f2) {
+  return (f1->bits        == f2->bits        &&
+          f1->rate        == f2->rate        &&
+          f1->channels    == f2->channels    &&
+          f1->byte_format == f2->byte_format &&
+          strcmp(f1->matrix, f2->matrix) == 0);
+}
+
+inline signed int scale(mad_fixed_t sample)
+{
+  /* add noise! */
+  sample += rand() % (1L << (MAD_F_FRACBITS - 24));
+
+  /* clip */
+  if (sample >= MAD_F_ONE)
+    sample = MAD_F_ONE - 1;
+  else if (sample < -MAD_F_ONE)
+    sample = -MAD_F_ONE;
+
+  /* quantize */
+  return sample >> (MAD_F_FRACBITS + 1 - 24);
+}
+
+
 enum mad_flow play_output(void *data,
                           struct mad_header const *header,
                           struct mad_pcm *pcm) {
-  // magic goes here
+  struct state_container *state = (struct state_container *)data;
+
+  ao_sample_format from_pcm = make_sample_format(pcm);
+  if (!state->out || !eq_sample_format(&(state->format), &from_pcm)) {
+    if (state->out) {
+      ao_close(state->out);
+    }
+    state->out = ao_open_live(state->driver_id, &from_pcm, NULL);
+  }
+
+  static char *buf = NULL;
+  int bufsize = 3 * 1024;
+  if (buf == NULL) {
+    if ((buf =(char *)malloc(bufsize)) == NULL) {
+      perror("malloc");
+      exit(1);
+    }
+  }
+
+  unsigned int nchannels = pcm->channels;
+  unsigned int samples_left = pcm->length;
+  char *point = buf;
+  mad_fixed_t *left_ch   = pcm->samples[0];
+  mad_fixed_t *right_ch  = pcm->samples[1];
+  while (samples_left--) {
+    int l = scale(*left_ch++);
+    *point++ = l & 0xFF;
+    *point++ = (l & 0xFF00) >> 8;
+    *point++ = (l & 0xFF0000) >> 16;
+
+    int r = nchannels == 2 ? scale(*right_ch++) : l;
+    *point++ = r & 0xFF;
+    *point++ = (r & 0xFF00) >> 8;
+    *point++ = (r & 0xFF0000) >> 16;
+
+    if (point == buf + bufsize) {
+      ao_play(state->out, buf, (uint_32)bufsize);
+      point = buf;
+    }
+  }
+  if (point > buf) {
+    ao_play(state->out, buf, (uint_32)(point - buf));
+  }
+
   return MAD_FLOW_CONTINUE;
 }
 
@@ -84,11 +165,17 @@ void play_stream(int fd) {
   struct state_container state;
   memset((void *)&state, 0, sizeof state);
   state.fd = fd;
+  state.driver_id = driver_id;
   state.out = NULL;
 
   struct mad_decoder decoder;
   mad_decoder_init(&decoder, &state, get_input, 0, 0, play_output, ignore_err, 0);
+  mad_decoder_run(&decoder, MAD_DECODER_MODE_SYNC);
+  mad_decoder_finish(&decoder);
 
+  if (state.out) {
+    ao_close(state.out);
+  }
   ao_shutdown();
 }
 
