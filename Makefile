@@ -33,3 +33,6 @@ SRC = d.c
 
 $(TARGET): $(SRC)
 	$(CC) $(CFLAGS) $(INCLUDE) $(LIBDIR) $(LIBS) $(SRC) -o $(TARGET)
+
+clean:
+	rm -f $(TARGET)
