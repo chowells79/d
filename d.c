@@ -58,7 +58,7 @@ ao_sample_format make_sample_format(struct mad_pcm *pcm) {
   res.bits = 32;
   res.rate = pcm->samplerate;
   res.channels = 2;
-  res.byte_format = AO_FMT_LITTLE;
+  res.byte_format = AO_FMT_NATIVE;
   res.matrix = "L,R";
 
   return res;
@@ -111,17 +111,13 @@ enum mad_flow play_output(void *data,
   mad_fixed_t *right_ch  = pcm->samples[1];
   while (samples_left--) {
     int l = scale(*left_ch++);
-    
-    *point++ = (l >> 0 ) & 0xFF;
-    *point++ = (l >> 8 ) & 0xFF;
-    *point++ = (l >> 16) & 0xFF;
-    *point++ = (l >> 24) & 0xFF;
+
+    *(mad_fixed_t *)point = l;
+    point += 4;
 
     int r = nchannels == 2 ? scale(*right_ch++) : l;
-    *point++ = (r >> 0 ) & 0xFF;
-    *point++ = (r >> 8 ) & 0xFF;
-    *point++ = (r >> 16) & 0xFF;
-    *point++ = (r >> 24) & 0xFF;
+    *(mad_fixed_t *)point = r;
+    point += 4;
 
     if (point == buf + bufsize) {
       ao_play(state->out, buf, bufsize);
