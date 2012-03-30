@@ -72,6 +72,14 @@ int eq_sample_format(ao_sample_format *f1, ao_sample_format *f2) {
           strcmp(f1->matrix, f2->matrix) == 0);
 }
 
+int scale(int sample) {
+    if (sample >  ((1 << 28) - 1))
+        sample =  ((1 << 28) - 1);
+    if (sample < -((1 << 28) - 1))
+        sample = -((1 << 28) - 1);
+    return sample * 8;
+}
+
 enum mad_flow play_output(void *data,
                           struct mad_header const *header,
                           struct mad_pcm *pcm) {
@@ -98,17 +106,18 @@ enum mad_flow play_output(void *data,
 
   unsigned int nchannels = pcm->channels;
   unsigned int samples_left = pcm->length;
+  fprintf(stderr, "Read %d samples ( x %d channels)\n", samples_left, nchannels);
   mad_fixed_t *left_ch   = pcm->samples[0];
   mad_fixed_t *right_ch  = pcm->samples[1];
   while (samples_left--) {
-    int l = *left_ch++;
+    int l = scale(*left_ch++);
     
     *point++ = (l >> 0 ) & 0xFF;
     *point++ = (l >> 8 ) & 0xFF;
     *point++ = (l >> 16) & 0xFF;
     *point++ = (l >> 24) & 0xFF;
 
-    int r = nchannels == 2 ? *right_ch++ : l;
+    int r = nchannels == 2 ? scale(*right_ch++) : l;
     *point++ = (r >> 0 ) & 0xFF;
     *point++ = (r >> 8 ) & 0xFF;
     *point++ = (r >> 16) & 0xFF;
@@ -137,6 +146,7 @@ enum mad_flow get_input(void *data,
   }
 
   ssize_t count = read(state->fd, buf, size);
+  fprintf(stderr, "read %d bytes\n", count);
 
   if (count < 0) {
     perror("read");
