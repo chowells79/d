@@ -141,8 +141,16 @@ enum mad_flow get_input(void *data,
     }
   }
 
-  ssize_t count = read(state->fd, buf, size);
-  fprintf(stderr, "read %d bytes\n", count);
+  unsigned char *target = buf;
+  size_t kept = 0;
+  if (stream->next_frame) {
+    kept = size - (stream->next_frame - buf);
+    memmove(buf, stream->next_frame, kept);
+    target += kept;
+  }
+
+  ssize_t count = read(state->fd, target, size - kept);
+  fprintf(stderr, "kept %d bytes, read %d bytes\n", kept, count);
 
   if (count < 0) {
     perror("read");
@@ -150,7 +158,7 @@ enum mad_flow get_input(void *data,
   } else if (count == 0) {
     return MAD_FLOW_STOP;
   } else {
-    mad_stream_buffer(stream, buf, count);
+    mad_stream_buffer(stream, buf, count + kept);
     return MAD_FLOW_CONTINUE;
   }
 }
