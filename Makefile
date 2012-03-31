@@ -4,7 +4,7 @@ WARN = \
 	-Wextra \
 	-Wall
 
-OPT = 
+OPT = -pthread
 
 DEBUG = -g
 

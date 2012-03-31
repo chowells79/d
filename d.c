@@ -8,6 +8,9 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
+#include <semaphore.h>
+#include <pthread.h>
+
 #include "ao/ao.h"
 #include "mad.h"
 
@@ -36,15 +39,57 @@ int main(void) {
 struct state_container {
   int fd;
   int driver_id;
-  ao_device *out;
-  ao_sample_format format;
+  sem_t r;
+  sem_t w;
+  volatile char *data;
+  volatile size_t len;
+  volatile ao_sample_format format;
 };
+
+void init_state_container(struct state_container *state) {
+  memset(state, 0, sizeof *state);
+  sem_init(&state->r, 0, 0);
+  sem_init(&state->w, 0, 1);
+}
+
+void *run_player(void *s) {
+  ao_device *out = NULL;
+  struct state_container *state = s;
+  ao_sample_format format;
+  memset(&format, 0, sizeof format);
+
+  while (1) {
+    sem_wait(&state->r);
+    char *block = state->data;
+    size_t len = state->len;
+    ao_sample_format fmt = state->format;
+    sem_post(&state->w);
+
+    if (block == NULL) {
+      break;
+    }
+
+    if (out == NULL || fmt.rate != format.rate) {
+      if (out) {
+        ao_close(out);
+      }
+      out = ao_open_live(state->driver_id, &fmt, NULL);
+      format = fmt;
+    }
+
+    ao_play(out, block, len);
+  }
+
+  if (out) {
+    ao_close(out);
+  }
+
+  return NULL;
+}
 
 enum mad_flow output_err(void *data,
                          struct mad_stream *stream,
                          struct mad_frame *frame) {
-  struct state_container *state = data;
-
   fprintf(stderr, "decoding error 0x%04x (%s)\n",
       stream->error, mad_stream_errorstr(stream));
 
@@ -64,14 +109,6 @@ ao_sample_format make_sample_format(struct mad_pcm *pcm) {
   return res;
 }
 
-int eq_sample_format(ao_sample_format *f1, ao_sample_format *f2) {
-  return (f1->bits        == f2->bits        &&
-          f1->rate        == f2->rate        &&
-          f1->channels    == f2->channels    &&
-          f1->byte_format == f2->byte_format &&
-          strcmp(f1->matrix, f2->matrix) == 0);
-}
-
 int scale(int sample) {
     if (sample >  ((1 << 28) - 1))
         sample =  ((1 << 28) - 1);
@@ -86,22 +123,21 @@ enum mad_flow play_output(void *data,
   struct state_container *state = (struct state_container *)data;
 
   ao_sample_format from_pcm = make_sample_format(pcm);
-  if (!state->out || !eq_sample_format(&(state->format), &from_pcm)) {
-    if (state->out) {
-      ao_close(state->out);
-    }
-    state->out = ao_open_live(state->driver_id, &from_pcm, NULL);
-  }
 
-  static char *buf = NULL;
+  static char *curr_buf = NULL;
+  static char *next_buf = NULL;
   static char *point = NULL;
-  size_t bufsize = 4 * 1024 * 16;
-  if (buf == NULL) {
-    if ((buf = calloc(bufsize, 1)) == NULL) {
+  size_t bufsize = 4 * 1024;
+  if (curr_buf == NULL) {
+    if ((curr_buf = calloc(bufsize, 1)) == NULL) {
       perror("calloc");
       exit(1);
     }
-    point = buf;
+    if ((next_buf = calloc(bufsize, 1)) == NULL) {
+      perror("calloc");
+      exit(1);
+    }
+    point = curr_buf;
   }
 
   unsigned int nchannels = pcm->channels;
@@ -119,9 +155,16 @@ enum mad_flow play_output(void *data,
     *(mad_fixed_t *)point = r;
     point += 4;
 
-    if (point == buf + bufsize) {
-      ao_play(state->out, buf, bufsize);
-      point = buf;
+    if (point == curr_buf + bufsize) {
+      sem_wait(&state->w);
+      state->data = curr_buf;
+      state->len = bufsize;
+      state->format = from_pcm;
+      sem_post(&state->r);
+      char *t = curr_buf;
+      curr_buf = next_buf;
+      next_buf = t;
+      point = curr_buf;
     }
   }
 
@@ -173,19 +216,22 @@ void play_stream(int fd) {
   }
 
   struct state_container state;
-  memset(&state, 0, sizeof state);
+  init_state_container(&state);
   state.fd = fd;
   state.driver_id = driver_id;
-  state.out = NULL;
+
+  pthread_t player_thread;
+  if (pthread_create(&player_thread, NULL, run_player, &state) != 0) {
+    perror("pthread_create");
+    exit(1);
+  }
 
   struct mad_decoder decoder;
   mad_decoder_init(&decoder, &state, get_input, 0, 0, play_output, output_err, 0);
   mad_decoder_run(&decoder, MAD_DECODER_MODE_SYNC);
   mad_decoder_finish(&decoder);
 
-  if (state.out) {
-    ao_close(state.out);
-  }
+  pthread_join(player_thread, NULL);
   ao_shutdown();
 }
 
