@@ -144,7 +144,7 @@ enum mad_flow get_input(void *data,
   unsigned char *target = buf;
   size_t kept = 0;
   if (stream->next_frame) {
-    kept = size - (stream->next_frame - buf);
+    kept = stream->bufend - stream->next_frame;
     memmove(buf, stream->next_frame, kept);
     target += kept;
   }
