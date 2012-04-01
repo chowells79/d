@@ -127,7 +127,7 @@ enum mad_flow play_output(void *data,
   static char *curr_buf = NULL;
   static char *next_buf = NULL;
   static char *point = NULL;
-  size_t bufsize = 4 * 1024;
+  size_t bufsize = 4 * 1024 * 32;
   if (curr_buf == NULL) {
     if ((curr_buf = calloc(bufsize, 1)) == NULL) {
       perror("calloc");
