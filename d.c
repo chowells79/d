@@ -8,6 +8,9 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
+#include <fcntl.h>
+#include <sys/stat.h>
+
 #include <semaphore.h>
 #include <pthread.h>
 
@@ -36,20 +39,40 @@ int main(void) {
   return 0;
 }
 
+void cleanup_semaphores(void) {
+  char *r = "d-read-semaphore";
+  char *w = "d-write-semaphore";
+  if (sem_unlink(r) == -1) {
+    perror("sem_unlink");
+  }
+  if (sem_unlink(w) == -1) {
+    perror("sem_unlink");
+  }
+}
+
 struct state_container {
   int fd;
   int driver_id;
-  sem_t r;
-  sem_t w;
-  volatile char *data;
-  volatile size_t len;
-  volatile ao_sample_format format;
+  sem_t *r;
+  sem_t *w;
+  char *data;
+  size_t len;
+  ao_sample_format format;
 };
 
-void init_state_container(struct state_container *state) {
-  memset(state, 0, sizeof *state);
-  sem_init(&state->r, 0, 0);
-  sem_init(&state->w, 0, 1);
+void init_state_container(struct state_container *s) {
+  char *r = "d-read-semaphore";
+  char *w = "d-write-semaphore";
+  memset(s, 0, sizeof *s);
+  if ((s->r = sem_open(r, O_CREAT | O_EXCL, S_IRWXU, 0)) == SEM_FAILED) {
+    perror("sem_open");
+    exit(1);
+  }
+  if ((s->w = sem_open(w, O_CREAT | O_EXCL, S_IRWXU, 1)) == SEM_FAILED) {
+    perror("sem_open");
+    exit(1);
+  }
+  atexit(cleanup_semaphores);
 }
 
 void *run_player(void *s) {
@@ -59,11 +82,11 @@ void *run_player(void *s) {
   memset(&format, 0, sizeof format);
 
   while (1) {
-    sem_wait(&state->r);
+    sem_wait(state->r);
     char *block = state->data;
     size_t len = state->len;
     ao_sample_format fmt = state->format;
-    sem_post(&state->w);
+    sem_post(state->w);
 
     if (block == NULL) {
       break;
@@ -127,7 +150,7 @@ enum mad_flow play_output(void *data,
   static char *curr_buf = NULL;
   static char *next_buf = NULL;
   static char *point = NULL;
-  size_t bufsize = 4 * 1024 * 32;
+  size_t bufsize = 4 * 1024 * 64;
   if (curr_buf == NULL) {
     if ((curr_buf = calloc(bufsize, 1)) == NULL) {
       perror("calloc");
@@ -156,11 +179,11 @@ enum mad_flow play_output(void *data,
     point += 4;
 
     if (point == curr_buf + bufsize) {
-      sem_wait(&state->w);
+      sem_wait(state->w);
       state->data = curr_buf;
       state->len = bufsize;
       state->format = from_pcm;
-      sem_post(&state->r);
+      sem_post(state->r);
       char *t = curr_buf;
       curr_buf = next_buf;
       next_buf = t;
